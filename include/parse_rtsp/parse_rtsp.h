@@ -91,7 +91,7 @@ class ParseRtsp
         
         if (av_packet_make_refcounted(pkt) < 0)
         {
-            printf("[pkt] is not refrence counted\n");
+            ROS_ERROR("[pkt] is not refrence counted\n");
             return -1;
         }
         pkt_list = (AVPacketList*)av_malloc(sizeof(AVPacketList));
@@ -145,7 +145,7 @@ class ParseRtsp
             {
                 if (ret == AVERROR_EOF)
                 {
-                    printf("audio avcodec_receive_frame(): the decoder has been fully flushed\n");
+                    ROS_ERROR("audio avcodec_receive_frame(): the decoder has been fully flushed\n");
                     res = 0;
                     av_frame_unref(p_frame);
                     return res;
@@ -156,14 +156,14 @@ class ParseRtsp
                 }
                 else if (ret == AVERROR(EINVAL))
                 {
-                    printf("audio avcodec_receive_frame(): codec not opened, or it is an encoder\n");
+                    ROS_ERROR("audio avcodec_receive_frame(): codec not opened, or it is an encoder\n");
                     res = -1;
                     av_frame_unref(p_frame);
                     return res;
                 }
                 else
                 {
-                    printf("audio avcodec_receive_frame(): legitimate decoding errors\n");
+                    ROS_ERROR("audio avcodec_receive_frame(): legitimate decoding errors\n");
                     res = -1;
                     av_frame_unref(p_frame);
                     return res;
@@ -187,7 +187,7 @@ class ParseRtsp
                     
                     if (s_audio_swr_ctx == NULL || swr_init(s_audio_swr_ctx) < 0)
                     {
-                        printf("Cannot create sample rate converter for conversion of %d Hz %s %d channels to %d Hz %s %d channels!\n",
+                        ROS_ERROR("Cannot create sample rate converter for conversion of %d Hz %s %d channels to %d Hz %s %d channels!\n",
                                 p_frame->sample_rate, av_get_sample_fmt_name((AVSampleFormat)p_frame->format), p_frame->channels,
                                 s_audio_param_tgt.freq, av_get_sample_fmt_name(s_audio_param_tgt.fmt), s_audio_param_tgt.channels);
                         swr_free(&s_audio_swr_ctx);
@@ -211,7 +211,7 @@ class ParseRtsp
                     int out_size  = av_samples_get_buffer_size(NULL, s_audio_param_tgt.channels, out_count, s_audio_param_tgt.fmt, 0);
                     if (out_size < 0)
                     {
-                        printf("av_samples_get_buffer_size() failed\n");
+                        ROS_ERROR("av_samples_get_buffer_size() failed\n");
                         return -1;
                     }
                     
@@ -226,12 +226,12 @@ class ParseRtsp
                     // 音频重采样：返回值是重采样后得到的音频数据中单个声道的样本数
                     nb_samples = swr_convert(s_audio_swr_ctx, out, out_count, in, p_frame->nb_samples);
                     if (nb_samples < 0) {
-                        printf("swr_convert() failed\n");
+                        ROS_ERROR("swr_convert() failed\n");
                         return -1;
                     }
                     if (nb_samples == out_count)
                     {
-                        printf("audio buffer is probably too small\n");
+                        ROS_WARN("audio buffer is probably too small\n");
                         if (swr_init(s_audio_swr_ctx) < 0)
                             swr_free(&s_audio_swr_ctx);
                     }
@@ -250,7 +250,7 @@ class ParseRtsp
                             codec_ctx->sample_fmt,
                             1);
                     
-                    printf("frame size %d, buffer size %d\n", frm_size, buf_size);
+                    ROS_INFO("frame size %d, buffer size %d\n", frm_size, buf_size);
                     assert(frm_size <= buf_size);
 
                     p_cp_buf = p_frame->data[0];
@@ -271,7 +271,7 @@ class ParseRtsp
                 ret = avcodec_send_packet(codec_ctx, p_packet);
                 if (ret != 0)
                 {
-                    printf("avcodec_send_packet() failed %d\n", ret);
+                    ROS_ERROR("avcodec_send_packet() failed %d\n", ret);
                     av_packet_unref(p_packet);
                     res = -1;
                     av_frame_unref(p_frame);
@@ -364,7 +364,7 @@ class ParseRtsp
                     {
                         av_packet_unref(p_packet);
                         p_packet = NULL;    // flush decoder
-                        printf("Flushing decoder...\n");
+                        ROS_INFO("Flushing decoder...\n");
                     }
                     else
                     {
@@ -435,9 +435,8 @@ class ParseRtsp
                         av_packet_unref(p_packet);
                     }
                 }
-                 cout <<"准备进入休眠状态" <<endl;
+                
                 SDL_PauseAudio(1); // 暂停音频设备
-                cout <<"关闭播放，重新进入休眠状态" <<endl;
                 SDL_Delay(40);
                 //is_input_finished = true;
 
@@ -461,7 +460,11 @@ class ParseRtsp
                     if(is_shutdown)
                         return ;
                 }
-                init_codec_sdl(); // 线程被唤醒后，进行初始化
+                if(!init_codec_sdl()) // 线程被唤醒后，进行初始化
+                {
+                    ROS_ERROR("初始化失败，重新进入休眠状态");
+                    is_rtsp_stream_coming = false;
+                }
             }
         }
     }
@@ -472,25 +475,23 @@ class ParseRtsp
 
         if(control_msg.size() < 2 || control_msg.size() > 3)
         {
-            cout <<"Wrong msg" <<endl;
+            cout <<"Wrong Callback Msg" <<endl;
         }
 
         if(control_msg[0] == "start_media_pull")
         {
-            cout <<"开始播放"<<endl;
             is_rtsp_stream_coming = true;
             rtsp_url = control_msg[2];
             cv.notify_one(); 
         }
         else if(control_msg[0] == "stop_media_pull")
         {
-            cout <<"关闭播放" <<endl;
             is_rtsp_stream_coming = false;
         }
         control_msg.clear();
     }
     
-    void init_codec_sdl()
+    bool init_codec_sdl()
     {
         s_audio_swr_ctx = swr_alloc();
         // A1. 构建AVFormatContext
@@ -499,13 +500,13 @@ class ParseRtsp
         int ret = avformat_open_input(&p_fmt_ctx, rtsp_url.c_str(), NULL, NULL);
         if (ret != 0)
         {
-            printf("avformat_open_input() failed %d\n", ret);
+            ROS_ERROR("avformat_open_input() failed %d\n", ret);
   
             if (s_resample_buf != NULL)
             {
                 av_free(s_resample_buf);
             }
-           
+            return false;
         }
 
         // A1.2 搜索流信息：读取一段视频文件数据，尝试解码，将取到的流信息填入p_fmt_ctx->streams
@@ -513,10 +514,9 @@ class ParseRtsp
         ret = avformat_find_stream_info(p_fmt_ctx, NULL);
         if (ret < 0)
         {
-            printf("avformat_find_stream_info() failed %d\n", ret);
-
+            ROS_ERROR("avformat_find_stream_info() failed %d\n", ret);
             avformat_close_input(&p_fmt_ctx);
-            
+            return false;
         }
 
         // 将文件相关信息打印在标准错误设备上
@@ -529,19 +529,18 @@ class ParseRtsp
             if (p_fmt_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO)
             {
                 a_idx = i;
-                printf("Find a audio stream, index %d\n", a_idx);
+                ROS_INFO("Find a audio stream, index %d\n", a_idx);
                 break;
             }
         }
         if (a_idx == -1)
         {
-            printf("Cann't find audio stream\n");
-
+            ROS_ERROR("Cann't find audio stream\n");
             avformat_close_input(&p_fmt_ctx);
+            return false;
         }
 
         // A3. 为音频流构建解码器AVCodecContext
-
         // A3.1 获取解码器参数AVCodecParameters
         p_codec_par = p_fmt_ctx->streams[a_idx]->codecpar;
 
@@ -549,9 +548,9 @@ class ParseRtsp
         p_codec = avcodec_find_decoder(p_codec_par->codec_id);
         if (p_codec == NULL)
         {
-            printf("Cann't find codec!\n");
-
+            ROS_ERROR("Cann't find codec!\n");
             avformat_close_input(&p_fmt_ctx);
+            return false;
         }
 
         // A3.3 构建解码器AVCodecContext
@@ -559,41 +558,41 @@ class ParseRtsp
         p_codec_ctx = avcodec_alloc_context3(p_codec);
         if (p_codec_ctx == NULL)
         {
-            printf("avcodec_alloc_context3() failed %d\n", ret);
-
+            ROS_ERROR("avcodec_alloc_context3() failed %d\n", ret);
             avformat_close_input(&p_fmt_ctx);
+            return false;
         }
         // A3.3.2 p_codec_ctx初始化：p_codec_par ==> p_codec_ctx，初始化相应成员
         ret = avcodec_parameters_to_context(p_codec_ctx, p_codec_par);
         if (ret < 0)
         {
-            printf("avcodec_parameters_to_context() failed %d\n", ret);
-
+            ROS_ERROR("avcodec_parameters_to_context() failed %d\n", ret);
             avcodec_free_context(&p_codec_ctx);
+            return false;
         }
         // A3.3.3 p_codec_ctx初始化：使用p_codec初始化p_codec_ctx，初始化完成
         ret = avcodec_open2(p_codec_ctx, p_codec, NULL);
         if (ret < 0)
         {
-            printf("avcodec_open2() failed %d\n", ret);
-
+            ROS_ERROR("avcodec_open2() failed %d\n", ret);
             avcodec_free_context(&p_codec_ctx);
+            return false;
         }
 
         p_packet = (AVPacket *)av_malloc(sizeof(AVPacket));
         if (p_packet == NULL)
         {  
-            printf("av_malloc() failed\n");  
-
+            ROS_ERROR("av_malloc() failed\n");  
             avcodec_free_context(&p_codec_ctx);
+            return false;
         }
 
         // B1. 初始化SDL子系统：缺省(事件处理、文件IO、线程)、视频、音频、定时器
         if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_TIMER))
         {  
-            printf("SDL_Init() failed: %s\n", SDL_GetError()); 
-           
+            ROS_ERROR("SDL_Init() failed: %s\n", SDL_GetError()); 
             av_packet_unref(p_packet);
+            return false;
         }
 
         // 初始化队列，数据清零，创建互斥锁和条件变量
@@ -614,8 +613,9 @@ class ParseRtsp
         wanted_spec.userdata = this;             // 提供给回调函数的参数
         if (SDL_OpenAudio(&wanted_spec, &actual_spec) < 0)
         {
-            printf("SDL_OpenAudio() failed: %s\n", SDL_GetError());
+            ROS_ERROR("SDL_OpenAudio() failed: %s\n", SDL_GetError());
             SDL_Quit();
+            return false;
         }
         // B2.2 根据SDL音频参数构建音频重采样参数
         // wanted_spec是期望的参数，actual_spec是实际的参数，wanted_spec和auctual_spec都是SDL中的参数。
@@ -634,10 +634,12 @@ class ParseRtsp
         
         if (s_audio_param_tgt.bytes_per_sec <= 0 || s_audio_param_tgt.frame_size <= 0)
         {
-            printf("av_samples_get_buffer_size failed\n");
+            ROS_ERROR("av_samples_get_buffer_size failed\n");
             SDL_Quit();
+            return false;
         }
         s_audio_param_src = s_audio_param_tgt;
+        return true;
     }
 
     void Analysis(const string& input) 
