@@ -16,6 +16,7 @@
 #include <condition_variable>
 #include <vector>
 #include <functional>
+#include <atomic>
 
 extern "C"
 {
@@ -63,11 +64,7 @@ FF_AudioParams s_audio_param_tgt;
 class ParseRtsp
 {
   public:
-    void onSignalReceived() 
-    {
-        cv.notify_one();
-    }
-    ParseRtsp():n("~")
+    ParseRtsp():n("~"), is_rtsp_stream_coming(false)
     {
         action_cmd_sub = n.subscribe("/cloud_command", 10, &ParseRtsp::msg_callback_func, this);
         media_state_pub = n.advertise<std_msgs::String>("/media_state", 1000);
@@ -241,7 +238,7 @@ class ParseRtsp
                     p_cp_buf = s_resample_buf;
                     cp_len = nb_samples * s_audio_param_tgt.channels * av_get_bytes_per_sample(s_audio_param_tgt.fmt);
                 }
-                else    // 不重采样
+                else 
                 {
                     // 根据相应音频参数，获得所需缓冲区大小
                     frm_size = av_samples_get_buffer_size(
@@ -525,6 +522,7 @@ class ParseRtsp
         {
             ROS_ERROR("avformat_find_stream_info() failed %d\n", ret);
             avformat_close_input(&p_fmt_ctx);
+            p_fmt_ctx = nullptr;
             return false;
         }
 
@@ -559,6 +557,7 @@ class ParseRtsp
         {
             ROS_ERROR("Cann't find codec!\n");
             avformat_close_input(&p_fmt_ctx);
+            p_fmt_ctx = nullptr;
             return false;
         }
 
@@ -569,6 +568,7 @@ class ParseRtsp
         {
             ROS_ERROR("avcodec_alloc_context3() failed %d\n", ret);
             avformat_close_input(&p_fmt_ctx);
+            p_fmt_ctx = nullptr;
             return false;
         }
         // A3.3.2 p_codec_ctx初始化：p_codec_par ==> p_codec_ctx，初始化相应成员
@@ -577,6 +577,10 @@ class ParseRtsp
         {
             ROS_ERROR("avcodec_parameters_to_context() failed %d\n", ret);
             avcodec_free_context(&p_codec_ctx);
+
+            avformat_close_input(&p_fmt_ctx);
+            p_fmt_ctx = nullptr;
+
             return false;
         }
         // A3.3.3 p_codec_ctx初始化：使用p_codec初始化p_codec_ctx，初始化完成
@@ -585,6 +589,9 @@ class ParseRtsp
         {
             ROS_ERROR("avcodec_open2() failed %d\n", ret);
             avcodec_free_context(&p_codec_ctx);
+
+            avformat_close_input(&p_fmt_ctx);
+            p_fmt_ctx = nullptr;
             return false;
         }
 
@@ -593,6 +600,9 @@ class ParseRtsp
         {  
             ROS_ERROR("av_malloc() failed\n");  
             avcodec_free_context(&p_codec_ctx);
+
+            avformat_close_input(&p_fmt_ctx);
+            p_fmt_ctx = nullptr;
             return false;
         }
 
@@ -601,7 +611,9 @@ class ParseRtsp
         {  
             ROS_ERROR("SDL_Init() failed: %s\n", SDL_GetError()); 
             av_packet_unref(p_packet);
-            p_packet = NULL;
+            avcodec_free_context(&p_codec_ctx);
+            avformat_close_input(&p_fmt_ctx);
+            p_fmt_ctx = nullptr;
             return false;
         }
 
@@ -625,6 +637,10 @@ class ParseRtsp
         {
             ROS_ERROR("SDL_OpenAudio() failed: %s\n", SDL_GetError());
             SDL_Quit();
+            av_packet_unref(p_packet);
+            avcodec_free_context(&p_codec_ctx);
+            avformat_close_input(&p_fmt_ctx);
+            p_fmt_ctx = nullptr;
             return false;
         }
         // B2.2 根据SDL音频参数构建音频重采样参数
@@ -646,6 +662,10 @@ class ParseRtsp
         {
             ROS_ERROR("av_samples_get_buffer_size failed\n");
             SDL_Quit();
+            av_packet_unref(p_packet);
+            avcodec_free_context(&p_codec_ctx);
+            avformat_close_input(&p_fmt_ctx);
+            p_fmt_ctx = nullptr;
             return false;
         }
         s_audio_param_src = s_audio_param_tgt;
@@ -675,7 +695,12 @@ class ParseRtsp
             avcodec_free_context(&p_codec_ctx);
 
         if(p_fmt_ctx)
+        {
             avformat_close_input(&p_fmt_ctx);
+            p_fmt_ctx = nullptr;
+        }
+            
+
         if(s_audio_swr_ctx)
             swr_free(&s_audio_swr_ctx);
 
@@ -699,7 +724,7 @@ class ParseRtsp
     bool is_initial = false;
 
     AVCodecParameters*  p_codec_par = NULL;
-    AVFormatContext*    p_fmt_ctx = NULL;
+    AVFormatContext*    p_fmt_ctx = nullptr;
     AVCodecContext*     p_codec_ctx = NULL;
     AVCodec*            p_codec = NULL;
     AVPacket*           p_packet = NULL;
@@ -707,7 +732,7 @@ class ParseRtsp
     SDL_AudioSpec       actual_spec;
     
     vector<string> control_msg;
-    bool is_rtsp_stream_coming = false;
+    std::atomic<bool> is_rtsp_stream_coming ;
     ros::NodeHandle n;
     ros::Subscriber action_cmd_sub;
     ros::Publisher  media_state_pub;
