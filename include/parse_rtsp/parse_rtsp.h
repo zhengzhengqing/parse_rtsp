@@ -70,6 +70,7 @@ class ParseRtsp
     ParseRtsp():n("~")
     {
         action_cmd_sub = n.subscribe("/cloud_command", 10, &ParseRtsp::msg_callback_func, this);
+        media_state_pub = n.advertise<std_msgs::String>("/media_state", 1000);
         thread_ = std::thread(std::bind(&ParseRtsp::recv_rtsp_stream, this));
         ros::spin();
     }
@@ -420,7 +421,12 @@ class ParseRtsp
             if(is_rtsp_stream_coming == true)
             {
                 SDL_PauseAudio(0);
-
+                {
+                    std_msgs::String msg;
+                    msg.data = "begin to play";
+                    media_state_pub.publish(msg);
+                }
+                
                 // A4. 从视频文件中读取一个packet，此处仅处理音频packet
                 //     对于音频来说，若是帧长固定的格式则一个packet可包含整数个frame，
                 //     若是帧长可变的格式则一个packet只包含一个frame
@@ -436,16 +442,16 @@ class ParseRtsp
                     }
                 }
                 
+                if(is_rtsp_stream_coming == true) // 不是人为关闭，说明读取过程失败
+                {
+                    std_msgs::String msg;
+                    msg.data = "failed to play";
+                    media_state_pub.publish(msg);
+                    is_rtsp_stream_coming = false;
+                }
+                
                 SDL_PauseAudio(1); // 暂停音频设备
                 SDL_Delay(40);
-                //is_input_finished = true;
-
-                // A5. 等待解码结束
-                // while (!is_decode_finished)
-                // {
-                //     cout <<"waiting" <<endl;
-                //     SDL_Delay(1000);
-                // }
                 SDL_Delay(1500);
                 release();
             }
@@ -462,6 +468,9 @@ class ParseRtsp
                 }
                 if(!init_codec_sdl()) // 线程被唤醒后，进行初始化
                 {
+                    std_msgs::String msg;
+                    msg.data = "intial failed";
+                    media_state_pub.publish(msg);
                     ROS_ERROR("初始化失败，重新进入休眠状态");
                     is_rtsp_stream_coming = false;
                 }
@@ -662,6 +671,10 @@ class ParseRtsp
         avcodec_free_context(&p_codec_ctx);
         avformat_close_input(&p_fmt_ctx);
         is_initial = false;
+
+        std_msgs::String msg;
+        msg.data = "close play";
+        media_state_pub.publish(msg);
     }
 
   private:
@@ -689,6 +702,7 @@ class ParseRtsp
     bool is_rtsp_stream_coming = false;
     ros::NodeHandle n;
     ros::Subscriber action_cmd_sub;
+    ros::Publisher  media_state_pub;
     string rtsp_url;
     int a_idx = -1;
     std::function<void(int)> signalHandle;
