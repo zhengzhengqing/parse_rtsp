@@ -19,7 +19,7 @@ int main(int argc, char **argv)
   ros::Publisher string_pub = nh.advertise<std_msgs::String>("/cloud_command", 10);
 
   // 设置循环的频率为0.05 Hz，即每20秒发布一次
-  ros::Rate loop_rate(0.05);
+  ros::Rate loop_rate(0.1);
   
 
   int count = 0;

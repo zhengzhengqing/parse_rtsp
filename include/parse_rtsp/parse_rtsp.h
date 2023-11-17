@@ -124,7 +124,7 @@ class ParseRtsp
         return 0;
     }
 
-    int audio_decode_frame(AVCodecContext *codec_ctx, AVPacket *p_packet, uint8_t *audio_buf, int buf_size)
+    int audio_decode_frame(AVCodecContext *codec_ctx, AVPacket *packet, uint8_t *audio_buf, int buf_size)
     {
         AVFrame *p_frame = av_frame_alloc();
         
@@ -174,9 +174,9 @@ class ParseRtsp
             {              
                 if (!is_initial)
                 {
-                    swr_free(&s_audio_swr_ctx);
+                    //swr_free(&s_audio_swr_ctx);
 
-                    s_audio_swr_ctx = swr_alloc_set_opts(nullptr,
+                    s_audio_swr_ctx = swr_alloc_set_opts(s_audio_swr_ctx,
                                         av_get_default_channel_layout(s_audio_param_tgt.channels), 
                                         s_audio_param_tgt.fmt, 
                                         s_audio_param_tgt.freq,
@@ -269,11 +269,11 @@ class ParseRtsp
             // 2 向解码器喂数据，每次喂一个packet
             if (need_new)
             {
-                ret = avcodec_send_packet(codec_ctx, p_packet);
+                ret = avcodec_send_packet(codec_ctx, packet);
                 if (ret != 0)
                 {
                     ROS_ERROR("avcodec_send_packet() failed %d\n", ret);
-                    av_packet_unref(p_packet);
+                    av_packet_unref(packet);
                     res = -1;
                     av_frame_unref(p_frame);
                     return res;
@@ -344,7 +344,7 @@ class ParseRtsp
         static uint32_t s_audio_len = 0;    // 新取得的音频数据大小
         static uint32_t s_tx_idx = 0;       // 已发送给设备的数据量
 
-        AVPacket *p_packet;
+        AVPacket *packet;
 
         int frm_size = 0;
         int ret_size = 0;
@@ -357,31 +357,31 @@ class ParseRtsp
             }
             if (s_tx_idx >= s_audio_len)
             {   // audio_buf缓冲区中数据已全部取出，则从队列中获取更多数据
-                p_packet = (AVPacket *)av_malloc(sizeof(AVPacket));
+                packet = (AVPacket *)av_malloc(sizeof(AVPacket));
                 // 1. 从队列中读出一包音频数据
-                if (rtsp->packet_queue_pop(&(s_audio_pkt_queue), p_packet, 1) <= 0)
+                if (rtsp->packet_queue_pop(&(s_audio_pkt_queue), packet, 1) <= 0)
                 {
                     if (rtsp->is_input_finished)
                     {
-                        av_packet_unref(p_packet);
-                        p_packet = NULL;    // flush decoder
+                        av_packet_unref(packet);
+                        packet = NULL;    // flush decoder
                         ROS_INFO("Flushing decoder...\n");
                     }
                     else
                     {
-                        av_packet_unref(p_packet);
+                        av_packet_unref(packet);
                         return;
                     }
                 }
         
                 // 2. 解码音频包
-                get_size = rtsp->audio_decode_frame(rtsp->p_codec_ctx, p_packet, s_audio_buf, sizeof(s_audio_buf));
+                get_size = rtsp->audio_decode_frame(rtsp->p_codec_ctx, packet, s_audio_buf, sizeof(s_audio_buf));
                 if (get_size < 0)
                 {
                     // 出错输出一段静音
                     s_audio_len = 1024; // arbitrary?
                     memset(s_audio_buf, 0, s_audio_len);
-                    av_packet_unref(p_packet);
+                    av_packet_unref(packet);
                 }
                 else if (get_size == 0) // 解码缓冲区被冲洗，整个解码过程完毕
                 {
@@ -390,11 +390,11 @@ class ParseRtsp
                 else
                 {
                     s_audio_len = get_size;
-                    av_packet_unref(p_packet);
+                    av_packet_unref(packet);
                 }
                 s_tx_idx = 0;
 
-                if (p_packet->data != NULL)
+                if (packet->data != NULL)
                 {
                     //av_packet_unref(p_packet);
                 }
@@ -601,6 +601,7 @@ class ParseRtsp
         {  
             ROS_ERROR("SDL_Init() failed: %s\n", SDL_GetError()); 
             av_packet_unref(p_packet);
+            p_packet = NULL;
             return false;
         }
 
@@ -667,11 +668,18 @@ class ParseRtsp
     void release()
     {
         SDL_Quit();
-        av_packet_unref(p_packet);
-        avcodec_free_context(&p_codec_ctx);
-        avformat_close_input(&p_fmt_ctx);
-        is_initial = false;
+        if(p_packet)
+            av_packet_unref(p_packet);
+        
+        if(p_codec_ctx)
+            avcodec_free_context(&p_codec_ctx);
 
+        if(p_fmt_ctx)
+            avformat_close_input(&p_fmt_ctx);
+        if(s_audio_swr_ctx)
+            swr_free(&s_audio_swr_ctx);
+
+        is_initial = false;
         std_msgs::String msg;
         msg.data = "close play";
         media_state_pub.publish(msg);

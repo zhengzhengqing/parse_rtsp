@@ -40,6 +40,7 @@ find_package(SDL2 REQUIRED)
 include_directories(${SDL2_INCLUDE_DIRS})
 
 add_executable(parse_rtsp src/main.cc)
+add_executable(test_rtsp src/test.cc)
 
 target_link_libraries(parse_rtsp
         ${SDL2_LIBRARIES}
@@ -48,5 +49,9 @@ target_link_libraries(parse_rtsp
         avutil
         swresample
         -pthread
+        ${catkin_LIBRARIES}
+        )
+
+target_link_libraries(test_rtsp
         ${catkin_LIBRARIES}
         )
