@@ -17,6 +17,7 @@
 #include <vector>
 #include <functional>
 #include <atomic>
+#include <memory> 
 
 extern "C"
 {
@@ -66,6 +67,7 @@ class ParseRtsp
   public:
     ParseRtsp():n("~"), is_rtsp_stream_coming(false)
     {
+        //av_init_packet(p_packet);
         action_cmd_sub = n.subscribe("/cloud_command", 10, &ParseRtsp::msg_callback_func, this);
         media_state_pub = n.advertise<std_msgs::String>("/media_state", 1000);
         thread_ = std::thread(std::bind(&ParseRtsp::recv_rtsp_stream, this));
@@ -298,7 +300,8 @@ class ParseRtsp
                 }
                 q->nb_packets--;
                 q->size -= p_pkt_node->pkt.size;
-                *pkt = p_pkt_node->pkt;
+                //*pkt = p_pkt_node->pkt;
+                av_packet_ref(pkt, &p_pkt_node->pkt);
                 av_free(p_pkt_node);
                 ret = 1;
                 break;
@@ -341,7 +344,8 @@ class ParseRtsp
         static uint32_t s_audio_len = 0;    // 新取得的音频数据大小
         static uint32_t s_tx_idx = 0;       // 已发送给设备的数据量
 
-        AVPacket *packet;
+        AVPacket *packet  = (AVPacket *)av_malloc(sizeof(AVPacket));
+        //std::unique_ptr<AVPacket, decltype(&av_packet_free)> packet(av_packet_alloc(), av_packet_free);
 
         int frm_size = 0;
         int ret_size = 0;
@@ -350,23 +354,33 @@ class ParseRtsp
         {
             if (rtsp->is_decode_finished)  // 解码完成标志
             {
+                if(packet)
+                {
+                    av_packet_free(&packet);
+                    packet = NULL;
+                }
                 return;
             }
             if (s_tx_idx >= s_audio_len)
             {   // audio_buf缓冲区中数据已全部取出，则从队列中获取更多数据
-                packet = (AVPacket *)av_malloc(sizeof(AVPacket));
+                //packet = (AVPacket *)av_malloc(sizeof(AVPacket));
                 // 1. 从队列中读出一包音频数据
-                if (rtsp->packet_queue_pop(&(s_audio_pkt_queue), packet, 1) <= 0)
+                if (rtsp->packet_queue_pop(&s_audio_pkt_queue, packet, 1) <= 0)
                 {
                     if (rtsp->is_input_finished)
                     {
                         av_packet_unref(packet);
-                        packet = NULL;    // flush decoder
+                        //packet = NULL;    // flush decoder
                         ROS_INFO("Flushing decoder...\n");
                     }
                     else
                     {
-                        av_packet_unref(packet);
+                        //av_packet_unref(packet);
+                        if(packet)
+                        {
+                            av_packet_free(&packet);
+                            packet = NULL;
+                        }
                         return;
                     }
                 }
@@ -408,6 +422,12 @@ class ParseRtsp
             len -= copy_len;
             stream += copy_len;
             s_tx_idx += copy_len;
+        }
+
+        if(packet)
+        {
+            av_packet_free(&packet);
+            packet = NULL;
         }
     }
 
@@ -500,9 +520,7 @@ class ParseRtsp
     bool init_codec_sdl()
     {
         s_audio_swr_ctx = swr_alloc();
-        // A1. 构建AVFormatContext
-        // A1.1 打开视频文件：读取文件头，将文件格式信息存储在"fmt context"中
-        // rtsp://zlm.robot.genius-pros.com:18554/virtual-robot/900106-900106-573c887e-d19e-47e9-8040-3d1fad20edc8
+    
         int ret = avformat_open_input(&p_fmt_ctx, rtsp_url.c_str(), NULL, NULL);
         if (ret != 0)
         {
@@ -662,7 +680,8 @@ class ParseRtsp
         {
             ROS_ERROR("av_samples_get_buffer_size failed\n");
             SDL_Quit();
-            av_packet_unref(p_packet);
+            
+            (p_packet);
             avcodec_free_context(&p_codec_ctx);
             avformat_close_input(&p_fmt_ctx);
             p_fmt_ctx = nullptr;
@@ -688,8 +707,13 @@ class ParseRtsp
     void release()
     {
         SDL_Quit();
+
         if(p_packet)
-            av_packet_unref(p_packet);
+        {
+            //av_packet_unref(p_packet);
+            av_packet_free(&p_packet);
+        }
+            
         
         if(p_codec_ctx)
             avcodec_free_context(&p_codec_ctx);
@@ -727,7 +751,8 @@ class ParseRtsp
     AVFormatContext*    p_fmt_ctx = nullptr;
     AVCodecContext*     p_codec_ctx = NULL;
     AVCodec*            p_codec = NULL;
-    AVPacket*           p_packet = NULL;
+    AVPacket*           p_packet = NULL;    
+    //AVPacket*           p_packet;
     SDL_AudioSpec       wanted_spec;
     SDL_AudioSpec       actual_spec;
     
