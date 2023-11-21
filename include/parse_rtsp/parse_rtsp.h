@@ -68,6 +68,7 @@ class ParseRtsp
     ParseRtsp():n("~"), is_rtsp_stream_coming(false)
     {
         //av_init_packet(p_packet);
+        p_packet = (AVPacket *)av_malloc(sizeof(AVPacket));
         action_cmd_sub = n.subscribe("/cloud_command", 10, &ParseRtsp::msg_callback_func, this);
         media_state_pub = n.advertise<std_msgs::String>("/media_state", 1000);
         thread_ = std::thread(std::bind(&ParseRtsp::recv_rtsp_stream, this));
@@ -300,8 +301,8 @@ class ParseRtsp
                 }
                 q->nb_packets--;
                 q->size -= p_pkt_node->pkt.size;
-                //*pkt = p_pkt_node->pkt;
-                av_packet_ref(pkt, &p_pkt_node->pkt);
+                *pkt = p_pkt_node->pkt;
+                //av_packet_ref(pkt, &p_pkt_node->pkt);
                 av_free(p_pkt_node);
                 ret = 1;
                 break;
@@ -453,6 +454,7 @@ class ParseRtsp
                     {
                         packet_queue_push(&s_audio_pkt_queue, p_packet);
                     }
+                    //av_packet_unref(p_packet);
                     else
                     {
                         av_packet_unref(p_packet);
@@ -613,7 +615,7 @@ class ParseRtsp
             return false;
         }
 
-        p_packet = (AVPacket *)av_malloc(sizeof(AVPacket));
+       
         if (p_packet == NULL)
         {  
             ROS_ERROR("av_malloc() failed\n");  
@@ -708,11 +710,11 @@ class ParseRtsp
     {
         SDL_Quit();
 
-        if(p_packet)
-        {
-            //av_packet_unref(p_packet);
-            av_packet_free(&p_packet);
-        }
+        // if(p_packet)
+        // {
+        //     //av_packet_unref(p_packet);
+        //     av_packet_free(&p_packet);
+        // }
             
         
         if(p_codec_ctx)
