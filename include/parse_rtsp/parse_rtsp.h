@@ -69,6 +69,7 @@ class ParseRtsp
     {
         //av_init_packet(p_packet);
         p_packet = (AVPacket *)av_malloc(sizeof(AVPacket));
+        p_frame = av_frame_alloc();
         action_cmd_sub = n.subscribe("/cloud_command", 10, &ParseRtsp::msg_callback_func, this);
         media_state_pub = n.advertise<std_msgs::String>("/media_state", 1000);
         thread_ = std::thread(std::bind(&ParseRtsp::recv_rtsp_stream, this));
@@ -96,6 +97,7 @@ class ParseRtsp
             return -1;
         }
         pkt_list = (AVPacketList*)av_malloc(sizeof(AVPacketList));
+        
         if (!pkt_list)
         {
             return -1;
@@ -126,7 +128,7 @@ class ParseRtsp
 
     int audio_decode_frame(AVCodecContext *codec_ctx, AVPacket *packet, uint8_t *audio_buf, int buf_size)
     {
-        AVFrame *p_frame = av_frame_alloc();
+        
         
         int frm_size = 0;
         int res = 0;
@@ -149,6 +151,7 @@ class ParseRtsp
                     ROS_ERROR("audio avcodec_receive_frame(): the decoder has been fully flushed\n");
                     res = 0;
                     av_frame_unref(p_frame);
+                    //av_frame_free(&p_frame);
                     return res;
                 }
                 else if (ret == AVERROR(EAGAIN))
@@ -160,13 +163,15 @@ class ParseRtsp
                     ROS_ERROR("audio avcodec_receive_frame(): codec not opened, or it is an encoder\n");
                     res = -1;
                     av_frame_unref(p_frame);
+                    //av_frame_free(&p_frame);
                     return res;
                 }
                 else
                 {
                     ROS_ERROR("audio avcodec_receive_frame(): legitimate decoding errors\n");
                     res = -1;
-                    av_frame_unref(p_frame);
+                    //av_frame_unref(p_frame);
+                    av_frame_free(&p_frame);
                     return res;
                 }
             }
@@ -263,6 +268,7 @@ class ParseRtsp
 
                 res = cp_len;
                 av_frame_unref(p_frame);
+                //av_frame_free(&p_frame);
                 return res;
             }
 
@@ -275,7 +281,8 @@ class ParseRtsp
                     ROS_ERROR("avcodec_send_packet() failed %d\n", ret);
                     av_packet_unref(packet);
                     res = -1;
-                    av_frame_unref(p_frame);
+                    //av_frame_unref(p_frame);
+                    av_frame_free(&p_frame);
                     return res;
                 }
             }
@@ -454,9 +461,9 @@ class ParseRtsp
                     {
                         packet_queue_push(&s_audio_pkt_queue, p_packet);
                     }
-                    //av_packet_unref(p_packet);
                     else
                     {
+                        cout <<"jajjaja" <<endl;
                         av_packet_unref(p_packet);
                     }
                 }
@@ -753,7 +760,8 @@ class ParseRtsp
     AVFormatContext*    p_fmt_ctx = nullptr;
     AVCodecContext*     p_codec_ctx = NULL;
     AVCodec*            p_codec = NULL;
-    AVPacket*           p_packet = NULL;    
+    AVPacket*           p_packet = NULL;
+    AVFrame*           p_frame = NULL;
     //AVPacket*           p_packet;
     SDL_AudioSpec       wanted_spec;
     SDL_AudioSpec       actual_spec;
