@@ -19,6 +19,9 @@
 #include <atomic>
 #include <memory> 
 
+#include <pthread.h>
+#include <stdio.h>
+
 extern "C"
 {
     #include <libavcodec/avcodec.h>
@@ -32,12 +35,6 @@ using namespace std;
 #define SDL_AUDIO_BUFFER_SIZE 2048
 #define MAX_AUDIO_FRAME_SIZE 192000
 
-bool is_shutdown = false;
-void signal_handler(int sig)
-{
-    ROS_INFO("Received Ctrl+C signal. Shutting down...");
-    is_shutdown = true;
-}
 
 typedef struct packet_queue_t
 {
@@ -89,6 +86,7 @@ class ParseRtsp
 
     int packet_queue_push(packet_queue_t *q, AVPacket *pkt)
     {
+        cout <<"a" <<endl;
         AVPacketList *pkt_list;
         
         if (av_packet_make_refcounted(pkt) < 0)
@@ -97,17 +95,18 @@ class ParseRtsp
             return -1;
         }
         pkt_list = (AVPacketList*)av_malloc(sizeof(AVPacketList));
-        
+        cout <<"b" <<endl;
         if (!pkt_list)
         {
+            cout <<"入队列时，内存申请失败" <<endl;
             return -1;
         }
         
         pkt_list->pkt = *pkt;
         pkt_list->next = NULL;
-
+        cout <<"c" <<endl;
         SDL_LockMutex(q->mutex);
-
+        cout <<"d" <<endl;
         if (!q->last_pkt)   // 队列为空
         {
             q->first_pkt = pkt_list;
@@ -121,15 +120,14 @@ class ParseRtsp
         q->size += pkt_list->pkt.size;
         // 发个条件变量的信号：重启等待q->cond条件变量的一个线程
         SDL_CondSignal(q->cond);
-
+        cout <<"e" <<endl;
         SDL_UnlockMutex(q->mutex);
+        cout <<"f" <<endl;
         return 0;
     }
 
     int audio_decode_frame(AVCodecContext *codec_ctx, AVPacket *packet, uint8_t *audio_buf, int buf_size)
     {
-        
-        
         int frm_size = 0;
         int res = 0;
         int ret = 0;
@@ -227,12 +225,14 @@ class ParseRtsp
                     }
                     if (s_resample_buf == NULL)
                     {
+                        cout <<"s_resample_buf 申请失败" <<endl;
                         return AVERROR(ENOMEM);
                     }
                     // 音频重采样：返回值是重采样后得到的音频数据中单个声道的样本数
                     nb_samples = swr_convert(s_audio_swr_ctx, out, out_count, in, p_frame->nb_samples);
                     if (nb_samples < 0) {
                         ROS_ERROR("swr_convert() failed\n");
+                        cout <<"swr_convert() failed" <<endl;
                         return -1;
                     }
                     if (nb_samples == out_count)
@@ -255,7 +255,7 @@ class ParseRtsp
                             p_frame->nb_samples,
                             codec_ctx->sample_fmt,
                             1);
-                    
+                    cout <<"frame size = "<< frm_size << "buffer size  = " <<  buf_size <<endl;
                     ROS_INFO("frame size %d, buffer size %d\n", frm_size, buf_size);
                     assert(frm_size <= buf_size);
 
@@ -278,6 +278,7 @@ class ParseRtsp
                 ret = avcodec_send_packet(codec_ctx, packet);
                 if (ret != 0)
                 {
+                    cout <<"向解码器喂数据失败" <<endl;
                     ROS_ERROR("avcodec_send_packet() failed %d\n", ret);
                     av_packet_unref(packet);
                     res = -1;
@@ -287,7 +288,6 @@ class ParseRtsp
                 }
             }
         }        
-        
     }
 
     int packet_queue_pop(packet_queue_t *q, AVPacket *pkt, int block)
@@ -316,11 +316,13 @@ class ParseRtsp
             }
             else if (is_input_finished)  // 队列已空，文件已处理完
             {
+                cout <<"队列为空" <<endl;
                 ret = 0;
                 break;
             }
             else if (!block)            // 队列空且阻塞标志无效，则立即退出
             {
+                cout <<"队列空且阻塞标志无效，则立即退出" <<endl;
                 ret = 0;
                 break;
             }
@@ -342,7 +344,13 @@ class ParseRtsp
     // 双声道采样点的顺序为LRLRLR
     void static sdl_audio_callback(void *userdata, uint8_t *stream, int len)
     {
+        
         ParseRtsp* rtsp = static_cast<ParseRtsp*>(userdata);
+        
+        std::cout <<"Thread ID in sdl_audio_callback : " << std::this_thread::get_id() <<endl;
+        rtsp->test = true;
+        
+
 
         //AVCodecContext *p_codec_ctx = (AVCodecContext *)userdata;
         int copy_len;           // 
@@ -358,17 +366,25 @@ class ParseRtsp
         int frm_size = 0;
         int ret_size = 0;
         int ret;
+
+        if(len == 0)
+        {
+            cout <<"播放缓冲区为0" <<endl;
+        }
         while (len > 0)         // 确保stream缓冲区填满，填满后此函数返回
         {
-            if (rtsp->is_decode_finished)  // 解码完成标志
-            {
-                if(packet)
-                {
-                    av_packet_free(&packet);
-                    packet = NULL;
-                }
-                return;
-            }
+            // if (rtsp->is_decode_finished)  // 解码完成标志
+            // {
+            //     cout <<"解码完成" <<endl;
+            //     if(packet)
+            //     {
+            //         av_packet_free(&packet);
+            //         packet = NULL;
+            //     }
+            //     return;
+            // }
+
+
             if (s_tx_idx >= s_audio_len)
             {   // audio_buf缓冲区中数据已全部取出，则从队列中获取更多数据
                 //packet = (AVPacket *)av_malloc(sizeof(AVPacket));
@@ -397,6 +413,7 @@ class ParseRtsp
                 get_size = rtsp->audio_decode_frame(rtsp->p_codec_ctx, packet, s_audio_buf, sizeof(s_audio_buf));
                 if (get_size < 0)
                 {
+                    cout <<"输出静音" <<endl;
                     // 出错输出一段静音
                     s_audio_len = 1024; // arbitrary?
                     memset(s_audio_buf, 0, s_audio_len);
@@ -441,8 +458,9 @@ class ParseRtsp
 
     void recv_rtsp_stream()
     {
-        while(ros::ok() &&!is_shutdown)
+        while(true)
         {
+            
             if(is_rtsp_stream_coming == true)
             {
                 SDL_PauseAudio(0);
@@ -457,6 +475,11 @@ class ParseRtsp
                 //     若是帧长可变的格式则一个packet只包含一个frame
                 while (is_rtsp_stream_coming && av_read_frame(p_fmt_ctx, p_packet) == 0)
                 {
+                    pthread_t thread_id = pthread_self();  // 获取当前线程的 ID
+                    printf("Thread ID: %lu\n", (unsigned long)thread_id);
+                    std::cout <<"Thread ID in recv_rtsp_stream : " << std::this_thread::get_id() <<endl;
+                    cout <<"OK" <<endl;
+                   
                     if (p_packet->stream_index == a_idx)
                     {
                         packet_queue_push(&s_audio_pkt_queue, p_packet);
@@ -467,33 +490,40 @@ class ParseRtsp
                         av_packet_unref(p_packet);
                     }
                 }
-                
+                cout <<"1111" <<endl;
                 if(is_rtsp_stream_coming == true) // 不是人为关闭，说明读取过程失败
                 {
+                     cout <<"2222" <<endl;
                     std_msgs::String msg;
                     msg.data = "failed to play";
                     media_state_pub.publish(msg);
                     is_rtsp_stream_coming = false;
                 }
-                
-                SDL_PauseAudio(1); // 暂停音频设备
-                SDL_Delay(40);
-                SDL_Delay(1500);
-                release();
+
+                try
+                {
+                    SDL_PauseAudio(1); // 暂停音频设备
+                    SDL_Delay(40);
+                    SDL_Delay(1500);
+                    release();
+                }
+                catch(const std::exception& e)
+                {
+                    std::cerr << e.what() << '\n';
+                }
             }
             else
             {
+                 cout <<"3333" <<endl;
                 while(is_rtsp_stream_coming == false )
                 {
                     std::cout <<"进入休眠状态，等待被唤醒" <<endl;
                     std::unique_lock<std::mutex> lock(mutex_);
                     cv.wait(lock);
-
-                    if(is_shutdown)
-                        return ;
                 }
                 if(!init_codec_sdl()) // 线程被唤醒后，进行初始化
                 {
+                    cout <<"4444" <<endl;
                     std_msgs::String msg;
                     msg.data = "intial failed";
                     media_state_pub.publish(msg);
@@ -502,6 +532,8 @@ class ParseRtsp
                 }
             }
         }
+
+        cout <<"thread over over over over over ---------------------------------------------"<<endl;
     }
 
     void msg_callback_func(const std_msgs::String &input)
@@ -515,6 +547,7 @@ class ParseRtsp
 
         if(control_msg[0] == "start_media_pull")
         {
+            cout <<"收到开启命令，准备开启" <<endl;
             is_rtsp_stream_coming = true;
             rtsp_url = control_msg[2];
             cv.notify_one(); 
@@ -522,6 +555,7 @@ class ParseRtsp
         else if(control_msg[0] == "stop_media_pull")
         {
             is_rtsp_stream_coming = false;
+            cout <<"收到关闭命令，准备关闭" <<endl;
         }
         control_msg.clear();
     }
@@ -774,4 +808,8 @@ class ParseRtsp
     string rtsp_url;
     int a_idx = -1;
     std::function<void(int)> signalHandle;
+
+    uint32_t count_ = 0;
+
+    bool test = false;
 };
