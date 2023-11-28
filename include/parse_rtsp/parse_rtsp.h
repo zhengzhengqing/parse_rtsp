@@ -70,6 +70,8 @@ class ParseRtsp
         action_cmd_sub = n.subscribe("/cloud_command", 10, &ParseRtsp::msg_callback_func, this);
         media_state_pub = n.advertise<std_msgs::String>("/media_state", 1000);
         thread_ = std::thread(std::bind(&ParseRtsp::recv_rtsp_stream, this));
+        sleep(3);
+        thread_test = std::thread(std::bind(&ParseRtsp::test_thread, this));
         ros::spin();
     }
     ~ParseRtsp()
@@ -747,6 +749,18 @@ class ParseRtsp
       }
     }
 
+    void test_thread()
+    {
+        cout <<"线程正在执行中-----------------------------------------------------------------"<<endl;
+        thread_.join();
+        cout <<"线程执行结束了=================================================================" <<endl;
+
+        while(true)
+        {
+            cout <<"线程执行结束了5555555555555555555555555555555555555555555555555" <<endl;
+        }
+    }
+
     void release()
     {
         SDL_Quit();
@@ -779,6 +793,7 @@ class ParseRtsp
 
   private:
     std::thread thread_;
+    std::thread thread_test;
     std::mutex mutex_;
     std::condition_variable cv;
 
