@@ -31,13 +31,9 @@ using namespace std;
 
 #define SDL_AUDIO_BUFFER_SIZE 2048
 #define MAX_AUDIO_FRAME_SIZE 192000
+Uint8 audioBuffer[SDL_AUDIO_BUFFER_SIZE];
 
-bool is_shutdown = false;
-void signal_handler(int sig)
-{
-    ROS_INFO("Received Ctrl+C signal. Shutting down...");
-    is_shutdown = true;
-}
+
 
 typedef struct packet_queue_t
 {
@@ -360,6 +356,7 @@ class ParseRtsp
         int ret;
         while (len > 0)         // 确保stream缓冲区填满，填满后此函数返回
         {
+            
             if (rtsp->is_decode_finished)  // 解码完成标志
             {
                 if(packet)
@@ -426,8 +423,19 @@ class ParseRtsp
                 copy_len = len;
             }
 
-            // 将解码后的音频帧(s_audio_buf+)写入音频设备缓冲区(stream)，播放
-            memcpy(stream, (uint8_t *)s_audio_buf + s_tx_idx, copy_len);
+            if(rtsp->is_fillter  < 25) // 输出一段静音
+            {
+                uint8_t buffer[copy_len];
+                memset(buffer, 0, copy_len);
+                memcpy(stream, (uint8_t *)buffer, copy_len);
+                rtsp->is_fillter ++;
+            }
+            else
+            {
+                // 将解码后的音频帧(s_audio_buf+)写入音频设备缓冲区(stream)，播放
+                memcpy(stream, (uint8_t *)s_audio_buf + s_tx_idx, copy_len);
+            }
+            
             len -= copy_len;
             stream += copy_len;
             s_tx_idx += copy_len;
@@ -442,7 +450,7 @@ class ParseRtsp
 
     void recv_rtsp_stream()
     {
-        while(ros::ok() &&!is_shutdown)
+        while(ros::ok())
         {
             if(is_rtsp_stream_coming == true)
             {
@@ -489,9 +497,6 @@ class ParseRtsp
                     std::cout <<"进入休眠状态，等待被唤醒" <<endl;
                     std::unique_lock<std::mutex> lock(mutex_);
                     cv.wait(lock);
-
-                    if(is_shutdown)
-                        return ;
                 }
                 if(!init_codec_sdl()) // 线程被唤醒后，进行初始化
                 {
@@ -529,6 +534,7 @@ class ParseRtsp
     
     bool init_codec_sdl()
     {
+        is_fillter = 0;
         s_audio_swr_ctx = swr_alloc();
     
         int ret = avformat_open_input(&p_fmt_ctx, rtsp_url.c_str(), NULL, NULL);
@@ -774,5 +780,6 @@ class ParseRtsp
     ros::Publisher  media_state_pub;
     string rtsp_url;
     int a_idx = -1;
-    std::function<void(int)> signalHandle;
+    int is_fillter = 0;
+
 };
