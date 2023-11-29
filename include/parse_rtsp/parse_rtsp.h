@@ -373,7 +373,7 @@ class ParseRtsp
             {   // audio_buf缓冲区中数据已全部取出，则从队列中获取更多数据
                 //packet = (AVPacket *)av_malloc(sizeof(AVPacket));
                 // 1. 从队列中读出一包音频数据
-                if (rtsp->packet_queue_pop(&s_audio_pkt_queue, packet, 1) <= 0)
+                if (rtsp->packet_queue_pop(&s_audio_pkt_queue, packet, 0) <= 0)
                 {
                     if (rtsp->is_input_finished)
                     {
@@ -386,7 +386,8 @@ class ParseRtsp
                         //av_packet_unref(packet);
                         if(packet)
                         {
-                            av_packet_free(&packet);
+                            av_freep(&packet);
+                            //av_packet_free(&packet);
                             packet = NULL;
                         }
                         return;
