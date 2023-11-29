@@ -685,8 +685,6 @@ class ParseRtsp
             swr_free(&s_audio_swr_ctx);
             s_audio_swr_ctx = nullptr;
         }
-        
-        
         is_initial = false;
     }
 
