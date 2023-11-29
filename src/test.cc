@@ -3,9 +3,9 @@
 #include <sstream>
 #include <iostream>
 using namespace std;
-
-string start = "start_media_pull#1#rtsp://zlm.robot.genius-pros.com:18554/virtual-robot/900106-900106-573c887e-d19e-47e9-8040-3d1fad20edc8";
-string stop = "stop_media_pull#1#rtsp://zlm.robot.genius-pros.com:18554/virtual-robot/900106-900106-573c887e-d19e-47e9-8040-3d1fad20edc8";
+// rtsp://zlm.robot.genius-pros.com:18554/virtual-robot/900106-900106-573c887e-d19e-47e9-8040-3d1fad20edc8";
+string start = "start_media_pull#1#rtsp://127.0.0.1:8554/test";
+string stop = "stop_media_pull#1#rtsp://127.0.0.1:8554/test";
 
 int main(int argc, char **argv)
 {
