@@ -65,7 +65,21 @@ class ParseRtsp
     {
         //av_init_packet(p_packet);
         p_packet = (AVPacket *)av_malloc(sizeof(AVPacket));
+
+        if(!p_packet)
+        {
+            ROS_ERROR("initial p_packet failed");
+            return ;
+        }
+
         p_frame = av_frame_alloc();
+
+        if(!p_frame)
+        {
+            ROS_ERROR("initial p_frame failed");
+            return ;
+        }
+
         action_cmd_sub = n.subscribe("/cloud_command", 10, &ParseRtsp::msg_callback_func, this);
         media_state_pub = n.advertise<std_msgs::String>("/media_state", 1000);
         thread_ = std::thread(std::bind(&ParseRtsp::recv_rtsp_stream, this));
@@ -73,7 +87,8 @@ class ParseRtsp
     }
     ~ParseRtsp()
     {
-
+        SDL_PauseAudio(1); // 暂停音频设备
+        release();
     }
 
     void packet_queue_init(packet_queue_t *q)
@@ -124,8 +139,6 @@ class ParseRtsp
 
     int audio_decode_frame(AVCodecContext *codec_ctx, AVPacket *packet, uint8_t *audio_buf, int buf_size)
     {
-        
-        
         int frm_size = 0;
         int res = 0;
         int ret = 0;
@@ -283,7 +296,6 @@ class ParseRtsp
                 }
             }
         }        
-        
     }
 
     int packet_queue_pop(packet_queue_t *q, AVPacket *pkt, int block)
@@ -713,7 +725,6 @@ class ParseRtsp
       std::istringstream stream(input);
       string token;
       char delimiter = '#';
-      // 使用 ',' 作为定界符从字符串中读取内容，并存储到 tokens 容器中
       while (std::getline(stream, token, delimiter)) 
       {
         control_msg.push_back(token);
@@ -722,14 +733,7 @@ class ParseRtsp
 
     void release()
     {
-        SDL_Quit();
-
-        // if(p_packet)
-        // {
-        //     //av_packet_unref(p_packet);
-        //     av_packet_free(&p_packet);
-        // }
-            
+        SDL_Quit();   
         
         if(p_codec_ctx)
             avcodec_free_context(&p_codec_ctx);
@@ -742,7 +746,11 @@ class ParseRtsp
             
 
         if(s_audio_swr_ctx)
+        {
             swr_free(&s_audio_swr_ctx);
+            s_audio_swr_ctx = nullptr;
+        }
+            
 
         is_initial = false;
         std_msgs::String msg;
